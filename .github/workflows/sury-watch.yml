@@ -22,10 +22,13 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # A fork inherits this schedule but usually has issues disabled, so every run there
+    # would fail in fetch_issues(). Reports belong to the upstream repository anyway.
+    if: ${{ !github.event.repository.fork }}
     steps:
       # Only the pins (targets/, and build/build.conf for php-defaults) and the script are
       # needed: a shallow, sparse checkout keeps the run short.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: |
             targets

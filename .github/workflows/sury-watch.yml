@@ -14,14 +14,52 @@ on:
         required: false
         default: ''
 
+# Read-only by default; only the reporting job raises it, and only where it runs.
 permissions:
   contents: read
-  issues: write
 
 jobs:
-  check:
+  # A fork inherits this schedule but usually has issues disabled, so it must not report.
+  # It still checks: drift makes the run fail, so a fork learns that its pins went stale
+  # instead of carrying them silently. Failures come only from drift, never from a missing
+  # issue tracker, and this job never holds a token that could write.
+  fork-drift:
+    if: ${{ github.event.repository.fork }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            targets
+            build
+            repo
+      # --simulate is built here rather than passed as one string: user input in
+      # inputs.simulate must not reach an unquoted expansion where a '*' could expand.
+      - name: Compare the pinned revisions with deb.sury.org, failing on drift
+        env:
+          SIMULATE: ${{ inputs.simulate }}
+        run: |
+          set -f
+          args=()
+          for s in $SIMULATE; do args+=(--simulate "$s"); done
+          echo '[]' > "$RUNNER_TEMP/issues.json"
+          out="$(repo/check-sury-updates.py --dry-run --issues "$RUNNER_TEMP/issues.json" "${args[@]}")"
+          printf '%s\n' "$out"
+          if grep -qE '^(update|dropped): ' <<<"$out"; then
+            echo "::error::deb.sury.org has newer sources, or a watched suite is gone; update the pins"
+            exit 1
+          fi
+
+  check:
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
     steps:
       # Only the pins (targets/, and build/build.conf for php-defaults) and the script are
       # needed: a shallow, sparse checkout keeps the run short.
@@ -31,26 +69,12 @@ jobs:
             targets
             build
             repo
-      # A fork inherits this schedule but usually has issues disabled, so it must not
-      # report. It still checks: drift makes the run fail here, so a fork learns that its
-      # pins went stale instead of carrying them silently. Failures come only from drift,
-      # never from a missing issue tracker.
-      - name: "Compare the pinned revisions with deb.sury.org (fork: report by failing)"
-        if: ${{ github.event.repository.fork }}
-        env:
-          SIMULATE: ${{ inputs.simulate }}
-        run: |
-          echo '[]' > "$RUNNER_TEMP/issues.json"
-          out="$(repo/check-sury-updates.py --dry-run --issues "$RUNNER_TEMP/issues.json" \
-                 $(for s in $SIMULATE; do printf -- '--simulate %s ' "$s"; done))"
-          printf '%s\n' "$out"
-          if grep -qE '^(update|dropped): ' <<<"$out"; then
-            echo "::error::deb.sury.org has newer sources, or a watched suite is gone; update the pins"
-            exit 1
-          fi
       - name: Compare the pinned revisions with deb.sury.org
-        if: ${{ !github.event.repository.fork }}
         env:
           GH_TOKEN: ${{ github.token }}
           SIMULATE: ${{ inputs.simulate }}
-        run: repo/check-sury-updates.py $(for s in $SIMULATE; do printf -- '--simulate %s ' "$s"; done)
+        run: |
+          set -f
+          args=()
+          for s in $SIMULATE; do args+=(--simulate "$s"); done
+          repo/check-sury-updates.py "${args[@]}"

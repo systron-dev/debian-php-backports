@@ -17,9 +17,13 @@ if [ ! -f "$TARGET_CONF" ]; then
     exit 1
 fi
 # shellcheck source=/dev/null
+source "$REPO_ROOT/build/version-suffix.sh"
+# shellcheck source=/dev/null
 source "$REPO_ROOT/build/build.conf"
 # shellcheck source=/dev/null
 source "$TARGET_CONF"
+# Same NEW_VERSION as the build used, also when VERSION_SUFFIX is overridden.
+apply_version_suffix || exit 1
 
 # php-common is checked only where the target rebuilds it (pins in build.conf).
 [ "${REBUILD_PHP_COMMON:-0}" = 1 ] || PHP_COMMON_VERSION=""

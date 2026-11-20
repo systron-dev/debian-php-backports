@@ -37,10 +37,14 @@ if [ ! -f "$TARGET_DIR/patches/series" ]; then
     exit 1
 fi
 
+# shellcheck source=version-suffix.sh
+source "$REPO_ROOT/build/version-suffix.sh"
 # shellcheck source=build.conf
 source "$REPO_ROOT/build/build.conf"
 # shellcheck source=/dev/null
 source "$TARGET_DIR/target.conf"
+# A VERSION_SUFFIX override replaces the suffix written into NEW_VERSION.
+apply_version_suffix || exit 1
 # Space separated lists may be written over several lines in target.conf.
 set -f
 EXTRA_DEB_URLS="$(echo ${EXTRA_DEB_URLS:-})"

@@ -401,7 +401,13 @@ from archived Debian or deb.sury.org sources pinned by SHA256:
    `sury` targets use Sury's source package as it is.
 4. The version gets an `+animaaN` suffix (`+animaa1`, raised on each rebuild of the same
    source) so it sorts above the version it was built from, and the packages are built
-   with `dpkg-buildpackage`.
+   with `dpkg-buildpackage`. `VERSION_SUFFIX` and the changelog author (`DEBFULLNAME`,
+   `DEBEMAIL`) can be set in the environment for a local build, e.g.
+   `VERSION_SUFFIX=+example1 DEBFULLNAME=Example DEBEMAIL=mail@example.org make
+   build-debian11-bullseye/php7.4-sury`. Each `target.conf` keeps its committed
+   `NEW_VERSION` (`+animaa1`, `+animaa2`, `+animaa4~squeeze`); `build/version-suffix.sh`
+   replaces that counter with `VERSION_SUFFIX`, so the install test checks the version the
+   build produced. `php-common`, where a target rebuilds it, carries the same suffix.
 5. An install test, in a clean container of the same release, installs the built
    packages — over the stock ones where the release has them — and runs PHP.
 

@@ -10,7 +10,7 @@ read -r -a packages <<< "$TEST_PACKAGES"
 FIRST_PACKAGE="${packages[0]}"
 CHANGELOG="/usr/share/doc/$FIRST_PACKAGE/changelog.Debian.gz"
 EXPECTED_VERSION="${NEW_VERSION:-${SOURCE_VERSION}${VERSION_SUFFIX}}"
-CVE_ID="CVE-2026-109618"
+CVE_ID="${TEST_CVE_ID:-CVE-2026-109618}"
 
 fail() {
     echo "FAIL: $*" >&2

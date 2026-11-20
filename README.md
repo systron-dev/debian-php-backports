@@ -19,24 +19,32 @@ PHP packages with security fixes for Debian releases that no longer receive them
 > its own PHP 5.5 included, gets fixes from Canonical any more. Xenial's own PHP 7.0,
 > bionic's 7.2.24 and focal's 7.4.3 are still patched through Ubuntu Pro (ESM).
 >
-> **Debian 9 stretch, Debian 10 buster and Debian 11 bullseye with their own PHP (7.0, 7.3
-> and 7.4): use [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) first.** Its public repository already has the fix for
-> amd64 and more (buster and bullseye also arm64), with more security fixes than a rebuild here would
-> have. The link explains how to add it to apt. ELTS is a service paid for by Freexian's
-> customers; the public repository comes with no guarantee. This repository does not
-> build these three.
+> **Debian 9 stretch, Debian 10 buster and Debian 11 bullseye:** the PHP versions in the
+> table are built here, from Sury's current sources, which are free. Other PHP versions he
+> packages are not built for those releases. Only the release's *own* packaging of its PHP
+> (7.0 on stretch, 7.3 on buster, 7.4 on bullseye) is not rebuilt here; for that,
+> [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) is
+> the only free source, with fixes for amd64 and more (buster and bullseye also arm64).
+> ELTS is a service paid for by Freexian's customers; the public repository comes with no
+> guarantee.
 >
 > deb.sury.org stopped updating Debian 11 bullseye in October 2026 and removes its packages
 > in November 2026 ([announcement](https://codeberg.org/oerdnj/deb.sury.org/issues/95)).
+> `debian11-bullseye/php7.4-sury` rebuilds his last source for bullseye. ELTS does not help
+> servers that run his packages: its `php7.4` has no epoch, so it never upgrades his
+> `1:7.4.33-…` builds.
 
 [deb.sury.org](https://deb.sury.org/) builds PHP — including old PHP versions — but only for
 Debian and Ubuntu releases that are still supported. Servers running an archived release
 get nothing from him. This repository covers what nobody else fixes: it rebuilds PHP for
 archived releases with the fixes applied, from sources you can check.
 
-Current fix: **CVE-2026-109618** and **CVE-2026-109619** ("PHP2Shell", remote code
-execution; advisories [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w)
-and [GHSA-6wmf-4rv5-p3rp](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp)).
+Current fixes: the **November 2026 batch** (CVE-2026-129538 and eleven more, listed below)
+in every `sury` target, and the bailout mitigation for **CVE-2026-109618** and
+**CVE-2026-109619** ("PHP2Shell", remote code execution; advisories
+[GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w)
+and [GHSA-6wmf-4rv5-p3rp](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp))
+in all targets.
 
 All targets carry the PHP group's mitigation for end-of-life PHP versions, the same patch
 Ondřej ships ("Avoid state corruption via bailout"). It is not the full fix from PHP 8.2+,
@@ -47,6 +55,56 @@ but it closes both problems in a simpler way:
 - **Session upload progress is turned off** (`session.upload_progress` has no effect).
   This removes one of the confirmed attack paths. If your application shows upload
   progress bars, they stop working.
+
+Every `sury` target is rebuilt from Sury's packages of 19 November 2026 and so carries the
+November 2026 fixes as well: CVE-2026-129538, CVE-2026-129496, CVE-2026-129289,
+CVE-2026-129292, CVE-2026-129291, CVE-2026-128090, CVE-2026-126714, CVE-2026-115560,
+CVE-2026-15353, CVE-2026-129506, CVE-2026-128064 and CVE-2026-127960, plus the older
+backports Sury added since the previous revisions; the exceptions and the exact list are in
+each target's `SOURCE.md` (PHP 5.6 has no CVE-2026-127960). The `debian` targets carry only
+what their `SOURCE.md` records.
+
+### Mitigations for the November 2026 fixes
+
+None of these replaces the updated packages; they lower exposure until it is installed.
+The CGI and FPM issues are reachable without application code; the session, SOAP and PHAR
+ones need an application path that uses those features.
+
+- **PHP-CGI, CVE-2026-129538** (out-of-bounds read and write in PATH_INFO correction):
+  serve PHP through PHP-FPM, not the CGI SAPI, and remove `phpX.Y-cgi` where nothing uses
+  it. Where CGI is needed, keep the binary out of the document root and set
+  `cgi.fix_pathinfo=0` (it narrows the PATH_INFO paths that reach the bug; it is not the fix).
+- **PHP-FPM, CVE-2026-129289** (request smuggling via an unread request body),
+  **CVE-2026-129292** (XSS in the status endpoint) and **CVE-2026-129291** (epoll
+  use-after-free, local privilege escalation): expose FPM only behind the front-end proxy,
+  never directly on a network socket. Restrict `pm.status_path` to local checks in the
+  proxy (`allow 127.0.0.1; deny all;`), so `/status?full` is not publicly readable. Run each
+  pool as a dedicated unprivileged user, with `listen.owner`/`listen.group` at mode `0660`,
+  so local users cannot talk to the socket.
+- **Sessions, CVE-2026-126714** (partially overwritten session files) and
+  **CVE-2026-115560** (serializer mismatch): set `session.serialize_handler` explicitly and
+  identically on every node, keep `session.use_strict_mode=1`, leave
+  `session.upload_progress.enabled=0` where nothing uses it (Sury's
+  `0211-Fix-GHSA-658j-…-session.upload_progress.enab` turns the default off on the
+  end-of-life branches these packages build from), and make `session.save_path` writable
+  by the PHP user only.
+- **PHAR, CVE-2026-128090** (OpenSSL signature bypass by algorithm downgrade): keep
+  `phar.readonly=1`, set `phar.require_hash=1`, and never load phar archives from uploads or
+  other untrusted sources.
+- **SOAP, CVE-2026-15353** (information disclosure through malformed array dimensions) and
+  **CVE-2026-129506** (use-after-free on DTD entity references): remove the extension
+  (`phpdismod soap`) where nothing uses it; where it is used, do not load WSDL from remote
+  or user-supplied URLs and keep the external entity loader disabled in the application
+  (`libxml_disable_entity_loader(true)` on PHP 7.x).
+- **Streams, CVE-2026-128064** (mixed-case HTTPS and FTPS URLs read in plaintext) and
+  **CVE-2026-127960** (denial of service through folded response headers): set
+  `allow_url_fopen=0` where nothing needs it, keep `default_socket_timeout` low, and cap
+  request and response header sizes at the proxy. Applications that fetch user-supplied
+  URLs should validate the scheme explicitly; mixed-case schemes defeat that comparison in
+  these versions.
+- **Date, CVE-2026-129496** (timezone cache use-after-free, remote code execution): no
+  setting removes it. Run such endpoints with `open_basedir` and a non-root FPM pool, and
+  treat the update as urgent.
 
 ## Packages
 
@@ -61,32 +119,32 @@ The commands under ["Installing"](#installing) take four values from this table:
 (`jessie`), `COMPONENT` is the Component column (`sury`) and `TARGET` is
 `php<PHP>-<COMPONENT>` (`php5.6-sury`).
 
-| Release | PHP | Component | Source package |
-|---|---|---|---|
-| `debian6-squeeze` | 5.4 | `debian7` | `php5` |
-| `debian7-wheezy` | 5.4 | `debian` | `php5` |
-| `debian8-jessie` | 5.6 | `debian` | `php5` |
-| `debian8-jessie` | 5.6 | `sury` | `php5.6` |
-| `debian8-jessie` | 7.1 | `sury` | `php7.1` |
-| `debian9-stretch` | 5.6 | `sury` | `php5.6` |
-| `debian9-stretch` | 7.0 | — not built here, use [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) | `php7.0` |
-| `debian9-stretch` | 7.3 | `sury` | `php7.3` |
-| `debian9-stretch` | 7.4 | `sury` | `php7.4` |
-| `debian10-buster` | 7.3 | — not built here, use [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) | `php7.3` |
-| `debian10-buster` | 5.6 | `sury` | `php5.6` |
-| `debian10-buster` | 7.4 | `sury` | `php7.4` |
-| `debian11-bullseye` | 7.4 | — not built here, use [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) | `php7.4` |
-| `ubuntu14.04-trusty` | 5.6 | `sury` | `php5.6` |
-| `ubuntu14.04-trusty` | 7.4 | `sury` | `php7.4` |
-| `ubuntu16.04-xenial` | 5.6 | `sury` | `php5.6` |
-| `ubuntu16.04-xenial` | 7.3 | `sury` | `php7.3` |
-| `ubuntu16.04-xenial` | 7.4 | `sury` | `php7.4` |
-| `ubuntu18.04-bionic` | 5.6 | `sury` | `php5.6` |
-| `ubuntu18.04-bionic` | 7.2 | `sury` | `php7.2` |
-| `ubuntu18.04-bionic` | 7.4 | `sury` | `php7.4` |
-| `ubuntu20.04-focal` | 5.6 | `sury` | `php5.6` |
-| `ubuntu20.04-focal` | 7.2 | `sury` | `php7.2` |
-| `ubuntu20.04-focal` | 7.4 | `sury` | `php7.4` |
+| Release | PHP | Component | Source package | Pinned source |
+|---|---|---|---|---|
+| `debian6-squeeze` | 5.4 | `debian7` | `php5` | `5.4.45-0+deb7u30` |
+| `debian7-wheezy` | 5.4 | `debian` | `php5` | `5.4.45-0+deb7u30` |
+| `debian8-jessie` | 5.6 | `debian` | `php5` | `5.6.40+dfsg-0+deb8u23` |
+| `debian8-jessie` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `debian8-jessie` | 7.1 | `sury` | `php7.1` | `7.1.33-85` |
+| `debian9-stretch` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `debian9-stretch` | 7.0 | `sury` | `php7.0` | `7.0.33-97` |
+| `debian9-stretch` | 7.3 | `sury` | `php7.3` | `7.3.33-41` |
+| `debian9-stretch` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `debian10-buster` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `debian10-buster` | 7.3 | `sury` | `php7.3` | `7.3.33-41` |
+| `debian10-buster` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `debian11-bullseye` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `ubuntu14.04-trusty` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `ubuntu14.04-trusty` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `ubuntu16.04-xenial` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `ubuntu16.04-xenial` | 7.3 | `sury` | `php7.3` | `7.3.33-41` |
+| `ubuntu16.04-xenial` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `ubuntu18.04-bionic` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `ubuntu18.04-bionic` | 7.2 | `sury` | `php7.2` | `7.2.34-70` |
+| `ubuntu18.04-bionic` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
+| `ubuntu20.04-focal` | 5.6 | `sury` | `php5.6` | `5.6.40-109` |
+| `ubuntu20.04-focal` | 7.2 | `sury` | `php7.2` | `7.2.34-70` |
+| `ubuntu20.04-focal` | 7.4 | `sury` | `php7.4` | `7.4.33-37` |
 
 The exact package version of every target is in the notes of each
 [tag](https://github.com/animaartificialis/debian-php-backports/releases/latest) (GitHub
@@ -97,10 +155,15 @@ tarball. Every version is the version it was built from (Debian's, Freexian ELTS
 `5.6.40-109+debsuryorg12.1+php+1+debian10+animaa1` on buster, built from Sury's Debian 12
 `5.6.40-109+debsuryorg12.1+php+1`.
 
-All targets are built for `amd64`. Five are also built for `arm64`: Debian 10 buster
-PHP 5.6 and 7.4, and Ubuntu 20.04 focal PHP 5.6, 7.2 and 7.4. These are the first releases that
-deb.sury.org no longer builds for. Older releases were rarely run on arm64, and buster's
-own PHP 7.3 already has an arm64 fix from [Freexian ELTS](https://www.freexian.com/lts/extended/).
+The Pinned source column is what `target.conf` pins (`SOURCE_VERSION`), without Sury's
+suite and upload suffix, which only marks the Debian release his package was built for:
+`7.4.33-37` is `7.4.33-37+debsuryorg12.1+php+1` (bookworm). It is updated with each pin
+bump, together with each target's `SOURCE.md` and changelog entry.
+
+All targets are built for `amd64`. Seven are also built for `arm64`: Debian 10 buster
+PHP 5.6, 7.3 and 7.4, Debian 11 bullseye PHP 7.4, and Ubuntu 20.04 focal PHP 5.6, 7.2 and
+7.4. These are the first releases that deb.sury.org no longer builds for. Older releases
+were rarely run on arm64.
 
 ### Components
 
@@ -117,15 +180,19 @@ The apt component says where the source comes from, and therefore what adding it
   PHP 8.2.36 (November 2026: CGI, FPM, session, SOAP, Phar, HTTP and FTP wrappers; see
   each target's `patches/SOURCE.md` for which apply to 5.4), and on wheezy
   and squeeze the CVE-2023-0662 fix (`max_multipart_body_parts`). The version sorts above
-  ELTS's, so apt picks it even with the ELTS repository enabled. Stretch and buster have no `debian` component: their own PHP
-  is fixed in [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/).
+  ELTS's, so apt picks it even with the ELTS repository enabled. Stretch, buster and
+  bullseye have no `debian` component: this repository rebuilds only Sury's newer PHP for
+  them (`sury`), not their own packaging.
+  [Freexian ELTS](https://www.freexian.com/lts/extended/docs/how-to-use-extended-lts/) is
+  the free source for the release's own PHP if that is what a server runs.
 - **`sury`** — Ondřej Surý's PHP packages (which already contain the fix), rebuilt for a
   release he no longer builds for. Use it if you already run his PHP version on that
   release. A few dependencies newer than the release has ship in the same component: on
   stretch `libpcre2` and `libargon2-1` from buster, on xenial `libpcre2`, `libargon2-0`
   and `libtidy5` from bionic, on trusty those three plus `libzip4` and `libsystemd0` from
   xenial (and trusty's own `libgcrypt20` from universe; PHP 5.6 needs only `libtidy5`
-  and `libzip4`), and everywhere but buster a `php-common` rebuilt from Sury's
+  and `libzip4`); bullseye needs nothing extra, its own libraries are new enough. Everywhere
+  but buster and bullseye a `php-common` rebuilt from Sury's
   `php-defaults` source (next paragraph). The shipped `libpcre2` replaces the older one
   of the release. `libpcre2-dev` ships too, because
   `phpX.Y-dev` needs it; the other `-dev` packages are only used for the build. The rebuild keeps the same
@@ -173,6 +240,13 @@ The apt component says where the source comes from, and therefore what adding it
   nm -D $(which php) | grep zend_mm_safe_error_ex
   # Expected: ... T zend_mm_safe_error_ex
   ```
+- **November 2026 fixes** (CVE-2026-129538 and the rest): check that the installed package
+  carries the changelog entry, and that the version is the one in the target's
+  `BUILD-INFO.txt`:
+  ```sh
+  zcat /usr/share/doc/phpX.Y-cli/changelog.Debian.gz | grep -c CVE-2026-129538
+  # Expected: 1 or more
+  ```
 
 ## Installing
 
@@ -193,11 +267,12 @@ release and the component (see also ["Components"](#components)). Not sure which
 you run? `lsb_release -sc` prints the codename; `cat /etc/os-release` works too.
 
 ```sh
-CODENAME=jessie    # Release column after the dash: jessie stretch buster xenial bionic focal
+CODENAME=jessie    # Release column after the dash: jessie stretch buster bullseye xenial bionic focal
 COMPONENT=sury     # Component column: sury or debian
 ```
 
-Then import the key and add the repository. On stretch, buster, xenial, bionic and focal:
+Then import the key and add the repository. On stretch, buster, bullseye, xenial, bionic
+and focal:
 
 ```sh
 curl -fsSL https://animaartificialis.github.io/debian-php-backports/debian-php-backports.asc \
@@ -227,11 +302,39 @@ apt-get install --only-upgrade 'php*'
 
 Jessie needs `apt-transport-https` and reasonably current CA certificates.
 
+If the upgrade still does not happen and `apt-cache policy phpX.Y-cli` shows an older
+version as Candidate, another repository is pinned higher. Sury's own packages commonly
+come with an apt preference of `990` (for example `Pin: release o=deb.sury.org` in
+`/etc/apt/preferences.d/`); a repository at the default `500` loses against it even though
+its version sorts higher. Pin this repository above it:
+
+```sh
+cat > /etc/apt/preferences.d/debian-php-backports.pref <<'EOF'
+Package: *
+Pin: release o=debian-php-backports
+Pin-Priority: 1001
+EOF
+apt-get update && apt-cache policy phpX.Y-cli
+```
+
+A tarball directory has no `Release` file, so pin by version instead, with the `new version`
+from its `BUILD-INFO.txt`:
+
+```sh
+cat > /etc/apt/preferences.d/debian-php-backports.pref <<'EOF'
+Package: php*
+Pin: version <new version from BUILD-INFO.txt>
+Pin-Priority: 1001
+EOF
+```
+
 ### Tarball
 
 Every [tag](https://github.com/animaartificialis/debian-php-backports/releases) has one
 tarball per target with its `.deb` files, a `Packages` index and `BUILD-INFO.txt`.
-The `arm64` tarballs end in `_arm64.tar.gz`; all others are `amd64`.
+The `arm64` tarballs end in `_arm64.tar.gz`; all others are `amd64`. A tarball works on
+every release the table lists, including those that can use the apt repository: it needs no
+network access at install time, and its `BUILD-INFO.txt` names the exact version to expect.
 
 The tarball is `${RELEASE}_${TARGET}.tar.gz` and unpacks to `$RELEASE/$TARGET/`, with
 `RELEASE` and `TARGET` taken from the table under ["Packages"](#packages). For the
@@ -262,6 +365,11 @@ apt-get update && apt-get upgrade
 For a specific tag instead of the latest, replace `latest/download` with
 `download/<tag>`, for example `download/v2026.10.26.1`.
 
+The local repository is unsigned (`[trusted=yes]`) and sits at the default apt priority, so
+the same applies as for the apt repository: if the new version is not picked as Candidate,
+follow ["apt repository"](#apt-repository) above and pin by version, since this directory
+has no `Release` file to pin by origin.
+
 Squeeze cannot download from GitHub at all: run the `curl` lines on another machine (or
 download from the tag's page), check the sum there and copy the tarball over. Its apt has no
 `[trusted=yes]`, so tell it to accept the unsigned local repository. This upgrades PHP 5.3
@@ -283,7 +391,7 @@ from archived Debian or deb.sury.org sources pinned by SHA256:
 1. A builder image is created from the release's own base image (`debian:<codename>-slim`,
    `debian/eol:squeeze`, or `ubuntu:<version>`), pointed at the release's archive
    (archive.debian.org for Debian, archive.ubuntu.com for Ubuntu), with the source package's build dependencies installed.
-   For the `sury` targets on every release but buster, the image also rebuilds
+   For the `sury` targets on every release but buster and bullseye, the image also rebuilds
    `php-common` from Sury's pinned `php-defaults` source without its `Breaks` field
    (`build/container/build-php-common.sh`, pins in `build/build.conf`), and the package
    ships with the target.
@@ -333,8 +441,9 @@ or closed issue already mentions are not reported again; a newer revision found 
 issue is open is added to it as a comment. A second kind of issue, labelled
 `sury-dropped`, appears when a release this README sends to Sury is gone from his archive,
 or its suite falls more than two weeks behind trixie's (Sury refreshes every suite
-daily). Bullseye was such a release until Sury ended it in November 2026; bookworm is the one
-watched now, and it is also where the pins come from. Those issues never receive update
+daily). Bullseye was such a release until Sury ended it in November 2026; it is now
+built here as `debian11-bullseye/php7.4-sury`, and bookworm is the one watched now, also
+where the pins come from. Those issues never receive update
 comments. The script also runs locally: `repo/check-sury-updates.py --dry-run`.
 
 ## License

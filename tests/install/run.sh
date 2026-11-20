@@ -70,6 +70,13 @@ fi
 v="APT_MIRROR_$ARCH"; APT_MIRROR="${!v:-$APT_MIRROR}"
 v="APT_SECURITY_MIRROR_$ARCH"; APT_SECURITY_MIRROR="${!v:-$APT_SECURITY_MIRROR}"
 
+# TEST_CVE_ID: only handed over when the target sets one, so the check keeps a single
+# default (in-container.sh picks it when the variable is absent).
+CVE_ENV=()
+if [ -n "${TEST_CVE_ID:-}" ]; then
+    CVE_ENV=(-e "TEST_CVE_ID=$TEST_CVE_ID")
+fi
+
 if ! compgen -G "$DIST_DIR/*.deb" > /dev/null; then
     echo "ERROR: no .deb files in $DIST_DIR; run 'make build-$TARGET' first" >&2
     exit 1
@@ -90,6 +97,7 @@ fi
     -e VERSION_SUFFIX="$VERSION_SUFFIX" \
     -e NEW_VERSION="${NEW_VERSION:-}" \
     -e TEST_DUMMY_PACKAGES="${TEST_DUMMY_PACKAGES:-}" \
+    "${CVE_ENV[@]}" \
     -e PHP_COMMON_VERSION="${PHP_COMMON_VERSION:-}" \
     -v "$DIST_DIR:/dist:ro" \
     -v "$SCRIPT_DIR/in-container.sh:/test.sh:ro" \
